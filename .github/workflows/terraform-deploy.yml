@@ -11,7 +11,7 @@ jobs:
     name: "Terraform Plan/Apply"
     runs-on: ubuntu-latest
     env:
-      AWS_REGION: us-east-1
+      AWS_REGION: us-east-2
 
     steps:
       - name: Checkout
@@ -39,3 +39,10 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: terraform apply -auto-approve
         working-directory: ./terraform
+    
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # Replace with the ARN of the role you just created
+          role-to-assume: arn:aws:iam::866934333672:role/sean-GitHubAction-DevOps-Pipeline-Role
+          aws-region: us-east-2
