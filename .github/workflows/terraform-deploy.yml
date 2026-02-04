@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  id-token: write # Required for requesting the JWT
+  contents: read  # Required for actions/checkout
+
 jobs:
   terraform:
     name: "Terraform Plan/Apply"
@@ -17,11 +21,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
+      # Only one "Configure AWS Credentials" step is needed
+      - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: arn:aws:iam::866934333672:role/sean-GitHubAction-DevOps-Pipeline-Role-1
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
@@ -39,10 +43,3 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: terraform apply -auto-approve
         working-directory: ./terraform
-    
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          # Replace with the ARN of the role you just created
-          role-to-assume: arn:aws:iam::866934333672:role/sean-GitHubAction-DevOps-Pipeline-Role
-          aws-region: us-east-2
