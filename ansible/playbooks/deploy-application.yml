@@ -1,0 +1,50 @@
+---
+- name: Deploy E-Commerce Application to EKS
+  hosts: bastion
+  vars:
+    cluster_name: ecommerce-prod
+    aws_region: us-east-2
+  tasks:
+    - name: Update kubeconfig
+      shell: aws eks update-kubeconfig --name {{ cluster_name }} --region {{ aws_region }}
+
+    - name: Apply namespaces
+      shell: kubectl apply -f kubernetes/namespaces.yaml
+
+    - name: Apply RBAC
+      shell: kubectl apply -f kubernetes/rbac.yaml
+
+    - name: Apply ConfigMap
+      shell: kubectl apply -f kubernetes/configmap.yaml
+
+    - name: Deploy microservices
+      shell: kubectl apply -f kubernetes/deployments/{{ item }}.yaml
+      loop:
+        - user-service
+        - product-service
+        - cart-service
+        - payment-service
+        - order-service
+
+    - name: Apply ingress
+      shell: kubectl apply -f kubernetes/ingress.yaml
+
+    - name: Wait for all deployments to be ready
+      shell: kubectl rollout status deployment/{{ item }} -n ecommerce --timeout=300s
+      loop:
+        - user-service
+        - product-service
+        - cart-service
+        - payment-service
+        - order-service
+
+    - name: Verify deployment
+      shell: |
+        kubectl get pods -n ecommerce
+        kubectl get svc -n ecommerce
+        kubectl get ingress -n ecommerce
+      register: deploy_status
+
+    - name: Display deployment status
+      debug:
+        var: deploy_status.stdout_lines
