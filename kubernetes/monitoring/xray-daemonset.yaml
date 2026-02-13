@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: xray-daemon
+  namespace: monitoring
+  labels:
+    app: xray-daemon
+spec:
+  selector:
+    matchLabels:
+      app: xray-daemon
+  template:
+    metadata:
+      labels:
+        app: xray-daemon
+    spec:
+      serviceAccountName: monitoring-sa
+      containers:
+        - name: xray-daemon
+          image: amazon/aws-xray-daemon:3.3.7
+          ports:
+            - containerPort: 2000
+              protocol: UDP
+          env:
+            - name: AWS_REGION
+              value: us-east-2
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: xray-daemon
+  namespace: monitoring
+spec:
+  type: ClusterIP
+  selector:
+    app: xray-daemon
+  ports:
+    - port: 2000
+      targetPort: 2000
+      protocol: UDP
