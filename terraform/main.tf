@@ -8,36 +8,66 @@ terraform {
   }
 }
 
-module "vpc" {
-  source  = "terraform-aws-modules/vpc/aws"
-  version = "~> 5.0"
-
-  name = "ecommerce-prod-vpc"
-  cidr = "10.0.0.0/16"
-
-  # 2 AZs instead of 3 - reduces NAT/subnet costs while keeping HA
-  azs             = ["us-east-2a", "us-east-2b"]
-  private_subnets = ["10.0.1.0/24", "10.0.2.0/24"]
-  public_subnets  = ["10.0.101.0/24", "10.0.102.0/24"]
-
-  # Single NAT gateway (~$32/mo vs ~$96/mo for one per AZ)
-  enable_nat_gateway   = true
-  single_nat_gateway   = true
-  enable_dns_hostnames = true
-
-  tags = {
-    Terraform   = "true"
-    Environment = "prod"
-  }
-}
-
-module "ecs" {
-  source = "./modules/ecs"
-
-  cluster_name       = "ecommerce-prod"
+# --- RDS PostgreSQL with Read Replica ---
+module "rds" {
+  source             = "./modules/rds"
+  cluster_name       = var.cluster_name
   vpc_id             = module.vpc.vpc_id
   private_subnet_ids = module.vpc.private_subnets
-  public_subnet_ids  = module.vpc.public_subnets
-  ecr_registry       = var.ecr_registry
-  aws_region         = var.aws_region
+  vpc_cidr           = module.vpc.vpc_cidr_block
+  db_username        = var.db_username
+  db_password        = var.db_password
+  environment        = var.environment
 }
+
+# --- ElastiCache Redis for Session Management ---
+module "elasticache" {
+  source             = "./modules/elasticache"
+  cluster_name       = var.cluster_name
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnets
+  vpc_cidr           = module.vpc.vpc_cidr_block
+  environment        = var.environment
+}
+
+# --- WAF for API Protection (Shield Standard included at no cost) ---
+module "waf" {
+  source       = "./modules/waf"
+  cluster_name = var.cluster_name
+  environment  = var.environment
+}
+
+# --- CloudFront CDN ---
+module "cloudfront" {
+  source       = "./modules/cloudfront"
+  cluster_name = var.cluster_name
+  environment  = var.environment
+  waf_acl_arn  = module.waf.web_acl_arn
+}
+
+# --- SQS/SNS Event-Driven Messaging ---
+module "messaging" {
+  source       = "./modules/messaging"
+  cluster_name = var.cluster_name
+  environment  = var.environment
+}
+
+# --- Secrets Manager ---
+module "secrets" {
+  source         = "./modules/secrets"
+  cluster_name   = var.cluster_name
+  environment    = var.environment
+  db_username    = var.db_username
+  db_password    = var.db_password
+  db_endpoint    = module.rds.db_endpoint
+  redis_endpoint = module.elasticache.redis_endpoint
+}
+
+# --- CloudWatch Monitoring ---
+module "monitoring" {
+  source                     = "./modules/monitoring"
+  cluster_name               = var.cluster_name
+  environment                = var.environment
+  aws_region                 = var.aws_region
+  cloudfront_distribution_id = module.cloudfront.distribution_id
+

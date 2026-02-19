@@ -1,10 +1,30 @@
 variable "aws_region" {
-  description = "AWS region to deploy into"
+  description = "Primary AWS region"
   type        = string
   default     = "us-east-2"
 }
 
-variable "ecr_registry" {
-  description = "ECR registry base URL (e.g. 123456789012.dkr.ecr.us-east-2.amazonaws.com)"
+variable "environment" {
+  description = "Environment name"
   type        = string
+  default     = "prod"
+}
+
+variable "cluster_name" {
+  description = "EKS cluster name"
+  type        = string
+  default     = "ecommerce-prod"
+}
+
+variable "db_username" {
+  description = "RDS master username"
+  type        = string
+  default     = "ecomadmin"
+  sensitive   = true
+}
+
+variable "db_password" {
+  description = "RDS master password"
+  type        = string
+  sensitive   = true
 }

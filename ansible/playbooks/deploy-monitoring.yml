@@ -1,0 +1,48 @@
+---
+- name: Deploy Monitoring Stack to EKS
+  hosts: bastion
+  tasks:
+    - name: Update kubeconfig
+      shell: aws eks update-kubeconfig --name ecommerce-prod --region us-east-2
+
+    - name: Create monitoring namespace
+      shell: kubectl apply -f - <<EOF
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: monitoring
+        EOF
+
+    - name: Deploy Prometheus
+      shell: |
+        kubectl apply -f kubernetes/monitoring/prometheus-config.yaml
+        kubectl apply -f kubernetes/monitoring/prometheus-deployment.yaml
+
+    - name: Deploy Grafana
+      shell: kubectl apply -f kubernetes/monitoring/grafana-deployment.yaml
+
+    - name: Deploy X-Ray daemon
+      shell: kubectl apply -f kubernetes/monitoring/xray-daemonset.yaml
+
+    - name: Create logging namespace
+      shell: kubectl apply -f - <<EOF
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: logging
+        EOF
+
+    - name: Deploy ELK stack
+      shell: kubectl apply -f kubernetes/monitoring/elk-stack.yaml
+
+    - name: Verify monitoring stack
+      shell: |
+        kubectl get pods -n monitoring
+        kubectl get pods -n logging
+        kubectl get svc -n monitoring
+        kubectl get svc -n logging
+      register: monitoring_status
+
+    - name: Display monitoring status
+      debug:
+        var: monitoring_status.stdout_lines

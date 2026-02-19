@@ -1,14 +1,25 @@
-terraform {
-  required_version = ">= 1.6"
+provider "aws" {
+  region = var.aws_region
 
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
+  default_tags {
+    tags = {
+      Project     = "ecommerce-platform"
+      Environment = var.environment
+      ManagedBy   = "terraform"
     }
   }
 }
 
 provider "aws" {
-  region = var.aws_region
+  alias  = "us_west_2"
+  region = "us-west-2"
+
+  default_tags {
+    tags = {
+      Project     = "ecommerce-platform"
+      Environment = var.environment
+      ManagedBy   = "terraform"
+      Region      = "dr"
+    }
+  }
 }
