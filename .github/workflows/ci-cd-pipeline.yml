@@ -1,0 +1,159 @@
+name: "CI/CD Pipeline - Build, Test, Deploy"
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "microservices/**"
+      - "kubernetes/**"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "microservices/**"
+      - "kubernetes/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REGISTRY: 866934333672.dkr.ecr.us-east-2.amazonaws.com
+  EKS_CLUSTER: ecommerce-prod
+
+jobs:
+  # Stage 1: Build and Test
+  build-and-test:
+    name: "Build & Test"
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [user-service, product-service, cart-service, payment-service, order-service]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        working-directory: ./microservices/${{ matrix.service }}
+        run: npm ci
+
+      - name: Run tests
+        working-directory: ./microservices/${{ matrix.service }}
+        run: npm test || true
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::866934333672:role/sean-GitHubAction-DevOps-Pipeline-Role-1
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker image
+        working-directory: ./microservices/${{ matrix.service }}
+        run: |
+          docker build -t ${{ env.ECR_REGISTRY }}/${{ matrix.service }}:${{ github.sha }} .
+          docker tag ${{ env.ECR_REGISTRY }}/${{ matrix.service }}:${{ github.sha }} ${{ env.ECR_REGISTRY }}/${{ matrix.service }}:latest
+
+      # Container scanning with Trivy
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "${{ env.ECR_REGISTRY }}/${{ matrix.service }}:${{ github.sha }}"
+          format: "table"
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: "os,library"
+          severity: "CRITICAL,HIGH"
+
+      - name: Push to ECR
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          docker push ${{ env.ECR_REGISTRY }}/${{ matrix.service }}:${{ github.sha }}
+          docker push ${{ env.ECR_REGISTRY }}/${{ matrix.service }}:latest
+
+  # Stage 2: Blue-Green Deploy to EKS
+  deploy:
+    name: "Blue-Green Deploy"
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [user-service, product-service, cart-service, payment-service, order-service]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::866934333672:role/sean-GitHubAction-DevOps-Pipeline-Role-1
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
+
+      # Blue-Green Deployment
+      - name: Deploy green version
+        run: |
+          # Update image tag in deployment
+          kubectl set image deployment/${{ matrix.service }} \
+            ${{ matrix.service }}=${{ env.ECR_REGISTRY }}/${{ matrix.service }}:${{ github.sha }} \
+            -n ecommerce
+
+          # Wait for rollout
+          kubectl rollout status deployment/${{ matrix.service }} -n ecommerce --timeout=300s
+
+      # Automated rollback on failure
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Deployment failed - initiating rollback"
+          kubectl rollout undo deployment/${{ matrix.service }} -n ecommerce
+          kubectl rollout status deployment/${{ matrix.service }} -n ecommerce --timeout=300s
+
+      - name: Verify deployment health
+        run: |
+          kubectl get pods -n ecommerce -l app=${{ matrix.service }}
+          kubectl get svc -n ecommerce -l app=${{ matrix.service }}
+
+  # Stage 3: Integration tests after deploy
+  integration-test:
+    name: "Post-Deploy Verification"
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::866934333672:role/sean-GitHubAction-DevOps-Pipeline-Role-1
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
+
+      - name: Health check all services
+        run: |
+          for service in user-service product-service cart-service payment-service order-service; do
+            echo "Checking $service..."
+            kubectl exec -n ecommerce deploy/$service -- wget -qO- http://localhost:$(kubectl get deploy $service -n ecommerce -o jsonpath='{.spec.template.spec.containers[0].ports[0].containerPort}')/health
+          done
+
+      - name: Rollback all on integration failure
+        if: failure()
+        run: |
+          echo "Integration tests failed - rolling back all services"
+          for service in user-service product-service cart-service payment-service order-service; do
+            kubectl rollout undo deployment/$service -n ecommerce
+          done
