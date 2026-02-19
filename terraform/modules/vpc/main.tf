@@ -9,30 +9,13 @@ module "vpc" {
   private_subnets = var.private_subnets
   public_subnets  = var.public_subnets
 
+  # Single NAT gateway to minimise cost (~$32/mo vs ~$96/mo for one per AZ)
   enable_nat_gateway   = true
   single_nat_gateway   = true
   enable_dns_hostnames = true
-
-  # Tags required for AWS Load Balancer Controller to discover subnets
-  public_subnet_tags = {
-    "kubernetes.io/role/elb"               = "1"
-    "kubernetes.io/cluster/ecommerce-prod" = "shared" # Add this!
-  }
-
-  private_subnet_tags = {
-    "kubernetes.io/role/internal-elb" = "1"
-    "kubernetes.io/cluster/ecommerce-prod" = "shared"
-  }
 
   tags = {
     Terraform   = "true"
     Environment = "prod"
   }
-}
-
-module "eks" {
-  source             = "./modules/eks"
-  cluster_name       = "ecommerce-prod"
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnets # This links the two!
 }
