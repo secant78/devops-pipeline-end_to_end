@@ -70,4 +70,4 @@ module "monitoring" {
   environment                = var.environment
   aws_region                 = var.aws_region
   cloudfront_distribution_id = module.cloudfront.distribution_id
-}
+
